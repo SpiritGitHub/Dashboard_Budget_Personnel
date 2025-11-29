@@ -20,6 +20,8 @@ Cette application interactive construite avec **Streamlit** vous permet de :
 - Exporter/importer vos transactions pour une gestion complète.
 - Le tout, en **Franc CFA** et adapté aux réalités locales.
 
+<img width="1261" height="615" alt="image" src="https://github.com/user-attachments/assets/f14d78f7-025d-423f-a9a3-51ddde40ab3a" />
+
 ---
 
 ## ✨ Fonctionnalités Clés
