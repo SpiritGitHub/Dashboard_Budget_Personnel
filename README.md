@@ -266,7 +266,9 @@ Projet sous licence **MIT**.
 
 ------------------------------------------------------------------------
 
-::: {align="center"}
-Développé avec ❤️ pour faciliter la gestion financière en Franc CFA.\
-Prenez le contrôle de vos finances !
-:::
+div align="center">
+Développé avec ❤️ pour une gestion financière simplifiée
+
+Prenez le contrôle de vos finances en Franc CFA !
+
+</div>
