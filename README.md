@@ -1,159 +1,78 @@
 # 💰 Application de Gestion de Budget Personnel
 
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Pandas](https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+Bienvenue sur l’application web de gestion du budget personnel en **Franc CFA (FCFA)**, conçue pour faciliter le suivi de vos finances quotidiennes grâce à une interface moderne, des visualisations interactives, et des alertes intelligentes.
 
-Une application web interactive développée avec **Streamlit** pour gérer
-vos finances personnelles en **Franc CFA (FCFA)**.\
-Suivez vos revenus et dépenses, analysez vos habitudes de consommation
-et contrôlez votre budget facilement.
+<div align="center">
+    <img src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white"/>
+    <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+    <img src="https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white"/>
+    <img src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white"/>
+</div>
 
-------------------------------------------------------------------------
+---
 
-## ✨ Fonctionnalités Principales
+## 🚀 À propos
 
-### 📊 Tableau de Bord Complet
+Cette application interactive construite avec **Streamlit** vous permet de :
+- Suivre vos **revenus**, **dépenses**, et leur évolution dans le temps.
+- Gérer vos **budgets par catégorie** avec des alertes de dépassement.
+- Analyser vos habitudes de consommation grâce à des graphiques interactifs.
+- Exporter/importer vos transactions pour une gestion complète.
+- Le tout, en **Franc CFA** et adapté aux réalités locales.
 
--   **Métriques financières** : Revenus, Dépenses, Solde, Taux
-    d'épargne\
--   **Alertes intelligentes** : Solde négatif, grosses dépenses,
-    dépassement de budget\
--   **Visualisations interactives** : Camemberts, courbes, barres, aires
-    empilées\
--   **Transactions récentes** : Vue des dernières opérations
+---
 
-### ➕ Gestion Simplifiée des Transactions
+## ✨ Fonctionnalités Clés
 
--   **Actions rapides** : Formulaires pré-remplis\
--   **Montants personnalisables**\
--   **Catégories organisées** : Alimentation, Transport, Loisirs, Santé,
-    Éducation, Logement, etc.\
--   **Saisie manuelle avancée**
+- **Tableau de bord** dynamique : métriques principales, solde, taux d’épargne, alertes.
+- **Ajout rapide ou manuel** de transactions (dépenses / revenus).
+- **Analyse détaillée** : Statistiques, tendances, distribution, classements par catégorie.
+- **Gestion mensuelle des budgets par catégorie**.
+- **Visualisations** : camemberts, courbes, barres horizontales, histogrammes, waterfall charts.
+- **Filtres avancés** par période, catégorie ou type.
+- **Import/Export** des données en CSV ou Excel.
+- Gestion des données avec une **base SQLite** locale robuste.
 
-### 📈 Analyse Financière Avancée
+---
 
--   **Statistiques détaillées** : Total, moyenne, max, volume\
--   **Graphiques analytiques** :
-    -   Revenus vs Dépenses / mois\
-    -   Waterfall chart (solde)\
-    -   Top catégories\
-    -   Distribution des montants\
-    -   Tendances hebdomadaires\
--   **Filtres avancés** : période, catégorie, type
-
-### 💼 Gestion des Budgets
-
--   **Budgets mensuels par catégorie**\
--   **Suivi en temps réel**\
--   **Visualisation en pourcentage**\
--   **Alertes dépassement**
-
-### 📥 Import / Export
-
--   **Export** : CSV, Excel\
--   **Import CSV**\
--   **Historique complet**\
--   **Sauvegarde SQLite automatique**
-
-------------------------------------------------------------------------
-
-## 🚀 Installation et Démarrage
+## 🛠️ Installation
 
 ### Prérequis
 
--   Python 3.7+\
--   pip
+- Python 3.7 ou supérieur
+- pip (`python -m ensurepip`)
 
-### Installation
+### Installation des dépendances
 
-``` bash
+```bash
 pip install streamlit pandas plotly numpy pillow openpyxl
 ```
 
-### Lancer l'application
+### (Optionnel) Fichier `requirements.txt`
 
-``` bash
-streamlit run app.py
+```
+streamlit>=1.28.0
+pandas>=2.0.0
+plotly>=5.0.0
+numpy>=1.24.0
+Pillow>=10.0.0
+openpyxl>=3.1.0
 ```
 
-Puis ouvrez :\
-👉 http://localhost:8501
+---
 
-------------------------------------------------------------------------
+## ⚡ Démarrage Rapide
 
-## 📁 Fichier `requirements.txt` (optionnel)
+```bash
+streamlit run app.py
+```
+Puis ouvrez [http://localhost:8501](http://localhost:8501) dans votre navigateur.
 
-    streamlit>=1.28.0
-    pandas>=2.0.0
-    plotly>=5.0.0
-    numpy>=1.24.0
-    Pillow>=10.0.0
-    openpyxl>=3.1.0
+---
 
-------------------------------------------------------------------------
+## 🗂️ Structure de la Base de Données
 
-## 📱 Guide d'Utilisation
-
-### 🔰 Premiers Pas
-
-1.  Lancez l'application\
-2.  Ajoutez vos premières transactions\
-3.  Consultez les statistiques\
-4.  Définissez vos budgets
-
-### ➕ Ajouter une Transaction Rapide
-
--   Allez dans **Transactions rapides**\
--   Choisissez **Revenu** ou **Dépense**\
--   Entrez le montant\
--   Cliquez sur **Ajouter**
-
-### 🧾 Exemples de Transactions
-
-  Type         Catégorie      Montant        Description
-  ------------ -------------- -------------- -----------------
-  💵 Revenu    Salaire        250 000 FCFA   Salaire mensuel
-  💵 Revenu    Bonus          50 000 FCFA    Prime
-  💸 Dépense   Alimentation   45 000 FCFA    Courses
-  💸 Dépense   Transport      25 000 FCFA    Carburant
-  💸 Dépense   Loisirs        15 000 FCFA    Sorties
-  💸 Dépense   Utilities      10 000 FCFA    Abonnements
-
-------------------------------------------------------------------------
-
-## 🎯 Fonctionnalités Détailées
-
-### 🔔 Système d'Alertes Intelligentes
-
--   Solde négatif\
--   Dépenses \> 50 000 FCFA\
--   Dépassement de budget\
--   Codes couleur (danger / warning / success)
-
-### 📊 Visualisations Interactives
-
--   Camemberts\
--   Courbes\
--   Barres horizontales\
--   Zones empilées\
--   Waterfall charts\
--   Histogrammes
-
-### ⚙️ Filtres Avancés
-
--   Périodes prédéfinies : Ce mois, 3 derniers mois, année\
--   Période personnalisée\
--   Catégorie multiple\
--   Type (Revenus, Dépenses)\
--   Tri avancé
-
-### 💾 Base de Données SQLite
-
-#### Structure
-
-``` sql
+```sql
 CREATE TABLE transactions (
     id INTEGER PRIMARY KEY,
     date TEXT NOT NULL,
@@ -172,103 +91,106 @@ CREATE TABLE budgets (
 );
 ```
 
-------------------------------------------------------------------------
+---
 
-## 🎨 Personnalisation
+## 📝 Mode d'emploi
 
-### Franc CFA (FCFA)
+### 1️⃣ Premiers Pas
 
--   Montants entiers\
--   Format : `X XXX FCFA`\
--   Seuils adaptés localement
+1. Lancez l’application
+2. Ajoutez vos premières transactions (dépense ou revenu)
+3. Consulter le tableau de bord
+4. Définissez vos budgets mensuels
 
-### UI Moderne
+### 2️⃣ Ajouter une Transaction
 
--   Cartes métriques\
--   Sidebar organisée\
--   Responsive\
--   Accessibilité renforcée
+- Rendez-vous sur **Transactions rapides**
+- Choisissez le type (Revenu / Dépense)
+- Remplissez le montant et validez
 
-------------------------------------------------------------------------
+### 3️⃣ Exemple de transactions
 
-## 🔧 Développement
+| Type      | Catégorie      | Montant      | Description        |
+|-----------|---------------|--------------|--------------------|
+| 💵 Revenu | Salaire        | 250 000 FCFA | Salaire mensuel    |
+| 💵 Revenu | Bonus          | 50 000 FCFA  | Prime ponctuelle   |
+| 💸 Dépense| Alimentation   | 45 000 FCFA  | Courses            |
+| 💸 Dépense| Transport      | 25 000 FCFA  | Carburant          |
+| 💸 Dépense| Loisirs        | 15 000 FCFA  | Sortie             |
 
-### Structure du Code
+---
 
-    - config & CSS
-    - base de données
-    - interface utilisateur (5 pages)
-    - utils
+## 📊 Visualisations et Analyses
 
-### Fonctions Clés (exemples)
+- **Camemberts** : répartition des dépenses
+- **Courbes** : évolution quotidienne et hebdomadaire
+- **Barres** : top catégories et plus grosses dépenses
+- **Histogrammes** : distribution des montants
+- **Waterfall chart** : évolution du solde global
+- **Alertes** : solde négatif, grosses dépenses, dépassement de budget
 
-``` python
-init_db()
-add_transaction()
-get_monthly_stats()
-check_alerts()
-format_fcfa()
-```
+---
 
-### Extensions possibles
+## 🎯 Gestion des Budgets
 
-``` python
-categories.append("Nouvelle Catégorie")
-ALERTE_GROSSE_DEPENSE = 75000
-```
+- Budgets mensuels personnalisés par catégorie
+- Visualisation en pourcentage d’utilisation
+- Alertes automatiques en cas de dépassement
 
-------------------------------------------------------------------------
+---
 
-## 📞 Support & Dépannage
+## 📥 Import / Export de Données
 
-### Problèmes courants
+- **Exporter** : tout ou partie des transactions en CSV ou Excel.
+- **Importer** : ajoutez des transactions à partir d’un fichier CSV
+- **Historique détaillé** avec possibilités de tri et de filtrage
 
--   Module manquant → installer via pip\
--   Port utilisé → `streamlit run app.py --server.port 8502`\
--   Graphiques vides → ajouter des transactions
+---
 
-### Performance
+## 💾 Personnalisation et Développement
 
--   Limiter les gros CSV\
--   Nettoyer la base si besoin
+- Gestion des montants en Franc CFA, format adapté : `X XXX FCFA`
+- Interface moderne et responsive (Streamlit + CSS customisé)
+- Codé en Python, base de données locale SQLite
+- Fonctions clés : `init_db`, `add_transaction`, `get_monthly_stats`, `check_alerts`, `format_fcfa`
 
-------------------------------------------------------------------------
+---
 
 ## 🤝 Contribution
 
-1.  Forker le projet\
+1. **Forkez** ce dépôt
+2. **Créez** une branche :  
+   ```bash
+   git checkout -b feature/nom-feature
+   ```
+3. **Commitez** vos modifications :  
+   ```bash
+   git commit -am "Ajout/Modif : message clair"
+   ```
+4. **Pushez** la branche :  
+   ```bash
+   git push origin feature/nom-feature
+   ```
+5. **Ouvrez une Pull Request** pour examen
 
-2.  Créer une branche :
+---
 
-    ``` bash
-    git checkout -b feature/new-feature
-    ```
+## 📞 Support
 
-3.  Commit :
+- Problème de dépendance ? → `pip install package_manquant`
+- Port déjà utilisé ? → `streamlit run app.py --server.port 8502`
+- Graphiques vides ? → Ajoutez des transactions !
+- Pour des suggestions ou des bugs, ouvrez une **issue**.
 
-    ``` bash
-    git commit -am "Ajout nouvelle fonctionnalité"
-    ```
-
-4.  Push :
-
-    ``` bash
-    git push origin feature/new-feature
-    ```
-
-5.  Ouvrir une Pull Request
-
-------------------------------------------------------------------------
+---
 
 ## 📄 Licence
 
-Projet sous licence **MIT**.
+Ce projet est sous licence **MIT**.
 
-------------------------------------------------------------------------
+---
 
-div align="center">
-Développé avec ❤️ pour une gestion financière simplifiée
-
+<div align="center">
+Développé avec ❤️ pour simplifier la gestion financière au quotidien.<br>
 Prenez le contrôle de vos finances en Franc CFA !
-
 </div>
