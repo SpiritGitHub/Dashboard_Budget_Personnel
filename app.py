@@ -1,18 +1,17 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+from PIL import Image
 import io
-import base64
-from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
 
-# Configuration de la page
+# =============== CONFIGURATION ================
 st.set_page_config(
-    page_title="Analyseur CSV Pro", 
-    page_icon="📊", 
+    page_title="💰 Budget Personnel",
+    page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -20,749 +19,936 @@ st.set_page_config(
 # =============== CSS PERSONNALISÉ ================
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
+    .metric-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
         border-radius: 10px;
-        border-left: 4px solid #1f77b4;
+        text-align: center;
+        margin: 10px 0;
     }
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+        margin: 10px 0;
     }
-    .download-link {
-        display: inline-block;
-        background-color: #1f77b4;
+    .metric-label {
+        font-size: 0.9rem;
+        opacity: 0.9;
+    }
+    .success { color: #10b981; }
+    .warning { color: #f59e0b; }
+    .danger { color: #ef4444; }
+    .alert-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    .quick-add-form {
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 10px 0;
+    }
+    .fcfa-badge {
+        background-color: #1a73e8;
         color: white;
-        padding: 0.5rem 1rem;
-        text-decoration: none;
-        border-radius: 5px;
-        margin: 0.2rem;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin-left: 5px;
     }
-    .download-link:hover {
-        background-color: #155a8a;
-        color: white;
+    .quick-action-btn {
+        margin: 5px 0;
+        width: 100%;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# =============== FONCTIONS AMÉLIORÉES =====================
+# =============== BASE DE DONNÉES ================
 
-def detect_outliers(series):
-    """Détecte les outliers avec la méthode IQR de manière robuste."""
-    if len(series.dropna()) == 0:
-        return 0
-    Q1 = series.quantile(0.25)
-    Q3 = series.quantile(0.75)
-    IQR = Q3 - Q1
-    if IQR == 0:  # Éviter la division par zéro
-        return 0
-    return ((series < Q1 - 1.5*IQR) | (series > Q3 + 1.5*IQR)).sum()
+def init_db():
+    """Initialise la base de données SQLite."""
+    conn = sqlite3.connect('budget.db')
+    c = conn.cursor()
+    
+    # Table transactions
+    c.execute('''CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        categorie TEXT NOT NULL,
+        montant INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        notes TEXT
+    )''')
+    
+    # Table budget
+    c.execute('''CREATE TABLE IF NOT EXISTS budgets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        categorie TEXT UNIQUE NOT NULL,
+        limite INTEGER NOT NULL,
+        mois TEXT NOT NULL
+    )''')
+    
+    conn.commit()
+    return conn
 
-def calculate_missing_percentage(df):
-    """Calcule le % de valeurs manquantes par colonne avec plus de détails."""
-    missing = df.isnull().sum()
-    percentage = (missing / len(df)) * 100
-    # Convertir les types de données en string pour éviter les problèmes de sérialisation
-    dtypes_str = [str(dtype) for dtype in df.dtypes.values]
-    missing_info = pd.DataFrame({
-        'Colonne': missing.index,
-        'Valeurs Manquantes': missing.values,
-        'Pourcentage (%)': percentage.values.round(2),
-        'Type de Données': dtypes_str
-    }).sort_values('Pourcentage (%)', ascending=False)
-    
-    return missing_info
+def add_transaction(date, description, categorie, montant, type_trans, notes=""):
+    """Ajoute une transaction à la base de données."""
+    conn = sqlite3.connect('budget.db')
+    c = conn.cursor()
+    c.execute('''INSERT INTO transactions (date, description, categorie, montant, type, notes)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+              (date, description, categorie, int(montant), type_trans, notes))
+    conn.commit()
+    conn.close()
 
-def generate_advanced_report(df):
-    """Génère un rapport Markdown avancé et complet."""
-    buffer = io.StringIO()
+def get_transactions(start_date=None, end_date=None, categorie=None):
+    """Récupère les transactions avec filtres optionnels."""
+    conn = sqlite3.connect('budget.db')
+    query = "SELECT * FROM transactions WHERE 1=1"
+    params = []
     
-    buffer.write("# 📄 Rapport d'Analyse Détaillé\n\n")
-    buffer.write(f"**Date de Génération:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+    if start_date:
+        query += " AND date >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND date <= ?"
+        params.append(end_date)
+    if categorie:
+        query += " AND categorie = ?"
+        params.append(categorie)
     
-    # Informations générales
-    buffer.write("## 📊 Informations Générales\n")
-    buffer.write(f"- **Nombre Total d'Observations:** {df.shape[0]:,}\n")
-    buffer.write(f"- **Nombre de Variables:** {df.shape[1]}\n")
-    buffer.write(f"- **Taille Mémoire Utilisée:** {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB\n\n")
+    query += " ORDER BY date DESC"
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
     
-    # Aperçu des données
-    buffer.write("## 👀 Aperçu du Dataset\n")
-    buffer.write("### Premières Lignes\n")
-    buffer.write(df.head(10).to_markdown() + "\n\n")
-    buffer.write("### Dernières Lignes\n")
-    buffer.write(df.tail(5).to_markdown() + "\n\n")
+    if not df.empty:
+        df['date'] = pd.to_datetime(df['date'])
+        df['montant'] = df['montant'].astype(int)
+    return df
+
+def set_budget(categorie, limite, mois):
+    """Définit ou met à jour le budget d'une catégorie."""
+    conn = sqlite3.connect('budget.db')
+    c = conn.cursor()
     
-    # Types de données
-    buffer.write("## 🔧 Types de Données\n")
-    type_summary = df.dtypes.reset_index()
-    type_summary.columns = ['Colonne', 'Type']
-    type_summary['Type'] = type_summary['Type'].astype(str)  # Convertir en string
-    buffer.write(type_summary.to_markdown(index=False) + "\n\n")
+    try:
+        c.execute('''INSERT INTO budgets (categorie, limite, mois)
+                     VALUES (?, ?, ?)''', (categorie, int(limite), mois))
+    except sqlite3.IntegrityError:
+        c.execute('''UPDATE budgets SET limite = ?, mois = ?
+                     WHERE categorie = ? AND mois = ?''',
+                  (int(limite), mois, categorie, mois))
     
-    # Analyse des valeurs manquantes
-    buffer.write("## ⚠️ Analyse des Valeurs Manquantes\n")
-    missing_df = calculate_missing_percentage(df)
-    buffer.write(missing_df.to_markdown(index=False) + "\n\n")
+    conn.commit()
+    conn.close()
+
+def get_budgets(mois):
+    """Récupère les budgets pour un mois donné."""
+    conn = sqlite3.connect('budget.db')
+    df = pd.read_sql_query("SELECT * FROM budgets WHERE mois = ?", conn, params=[mois])
+    conn.close()
     
-    # Statistiques descriptives
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    if len(numeric_cols) > 0:
-        buffer.write("## 📈 Statistiques Descriptives (Numériques)\n")
-        buffer.write(df[numeric_cols].describe().round(2).to_markdown() + "\n\n")
+    if not df.empty:
+        df['limite'] = df['limite'].astype(int)
+    return df
+
+def get_monthly_stats(year, month):
+    """Calcule les statistiques mensuelles."""
+    conn = sqlite3.connect('budget.db')
+    month_str = f"{year}-{month:02d}"
     
-    # Variables catégorielles
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-    if len(categorical_cols) > 0:
-        buffer.write("## 📊 Statistiques Descriptives (Catégorielles)\n")
-        for col in categorical_cols:
-            buffer.write(f"### {col}\n")
-            buffer.write(f"- **Valeurs Uniques:** {df[col].nunique()}\n")
-            buffer.write(f"- **Valeur la plus Fréquente:** {df[col].mode().iloc[0] if len(df[col].mode()) > 0 else 'N/A'}\n")
-            buffer.write(f"- **Fréquence de la Valeur Principale:** {df[col].value_counts().iloc[0] if len(df[col].value_counts()) > 0 else 0}\n\n")
+    df = pd.read_sql_query(
+        "SELECT * FROM transactions WHERE date LIKE ? ORDER BY date",
+        conn, params=[f"{month_str}%"]
+    )
+    conn.close()
     
-    # Détection des outliers
-    if len(numeric_cols) > 0:
-        buffer.write("## 🔴 Analyse des Outliers (Méthode IQR)\n")
-        outliers_detected = False
-        for col in numeric_cols:
-            count = detect_outliers(df[col])
-            if count > 0:
-                buffer.write(f"- **{col}:** {count} outliers ({count/len(df)*100:.2f}%)\n")
-                outliers_detected = True
-        if not outliers_detected:
-            buffer.write("Aucun outlier détecté dans les variables numériques.\n")
-        buffer.write("\n")
+    if df.empty:
+        return None
     
-    # Matrice de corrélation
-    if len(numeric_cols) > 1:
-        buffer.write("## 🔗 Matrice de Corrélation\n")
-        corr_matrix = df[numeric_cols].corr()
-        # Garder seulement la partie supérieure de la matrice
-        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-        corr_upper = corr_matrix.where(mask)
-        buffer.write(corr_upper.round(3).to_markdown() + "\n\n")
+    df['date'] = pd.to_datetime(df['date'])
+    df['montant'] = df['montant'].astype(int)
     
-    # Profil des variables
-    buffer.write("## 🎯 Profil des Variables\n")
-    for col in df.columns:
-        buffer.write(f"### {col}\n")
-        buffer.write(f"- **Type:** {df[col].dtype}\n")
-        buffer.write(f"- **Valeurs Uniques:** {df[col].nunique()}\n")
-        if df[col].dtype in ['object', 'category']:
-            top_values = df[col].value_counts().head(5)
-            buffer.write("- **Top 5 Valeurs:**\n")
-            for val, count in top_values.items():
-                buffer.write(f"  - {val}: {count} ({count/len(df)*100:.1f}%)\n")
-        else:
-            buffer.write(f"- **Moyenne:** {df[col].mean():.2f}\n")
-            buffer.write(f"- **Médiane:** {df[col].median():.2f}\n")
-            buffer.write(f"- **Écart-type:** {df[col].std():.2f}\n")
-        buffer.write("\n")
+    revenus = df[df['type'] == 'Revenu']['montant'].sum()
+    depenses = df[df['type'] == 'Dépense']['montant'].sum()
     
+    return {
+        'revenus': int(revenus),
+        'depenses': int(depenses),
+        'solde': int(revenus - depenses),
+        'transactions': df
+    }
+
+def format_fcfa(montant):
+    """Formate un montant en FCFA avec séparateurs de milliers."""
+    return f"{int(montant):,} FCFA".replace(",", " ")
+
+def check_alerts(df_transactions, budgets_df):
+    """Vérifie les alertes intelligentes."""
+    alerts = []
+    
+    # Solde négatif
+    solde_mensuel = get_monthly_stats(datetime.now().year, datetime.now().month)
+    if solde_mensuel and solde_mensuel['solde'] < 0:
+        alerts.append({
+            'type': 'danger',
+            'message': f"⚠️ Solde négatif: {format_fcfa(solde_mensuel['solde'])}"
+        })
+    
+    # Grosses dépenses (supérieures à 50 000 FCFA)
+    grosses_depenses = df_transactions[
+        (df_transactions['type'] == 'Dépense') & 
+        (df_transactions['montant'] > 50000)
+    ]
+    if not grosses_depenses.empty:
+        for _, depense in grosses_depenses.head(3).iterrows():
+            alerts.append({
+                'type': 'warning',
+                'message': f"💰 Grosse dépense: {depense['description']} - {format_fcfa(depense['montant'])}"
+            })
+    
+    # Dépassement de budget
+    if not budgets_df.empty:
+        for _, budget in budgets_df.iterrows():
+            depenses_categorie = df_transactions[
+                (df_transactions['categorie'] == budget['categorie']) & 
+                (df_transactions['type'] == 'Dépense')
+            ]['montant'].sum()
+            
+            if depenses_categorie > budget['limite']:
+                alerts.append({
+                    'type': 'warning',
+                    'message': f"📊 Budget dépassé {budget['categorie']}: {format_fcfa(depenses_categorie)}/{format_fcfa(budget['limite'])}"
+                })
+    
+    return alerts
+
+def export_to_csv(df):
+    """Exporte les données en CSV."""
+    csv = df.to_csv(index=False).encode()
+    return csv
+
+def export_to_excel(df):
+    """Exporte les données en Excel."""
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Transactions')
+    buffer.seek(0)
     return buffer.getvalue()
-
-def create_download_link(content, filename, text):
-    """Crée un lien de téléchargement pour le contenu textuel."""
-    b64 = base64.b64encode(content.encode()).decode()
-    href = f'<a href="data:file/txt;base64,{b64}" download="{filename}" class="download-link">{text}</a>'
-    return href
-
-def create_data_download_link(df, filename, text, format_type='csv'):
-    """Crée un lien de téléchargement pour les données."""
-    if format_type == 'csv':
-        data = df.to_csv(index=False).encode('utf-8')
-        mime_type = "text/csv"
-    elif format_type == 'json':
-        data = df.to_json(orient='records', indent=2).encode('utf-8')
-        mime_type = "application/json"
-    elif format_type == 'excel':
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Data')
-        data = buffer.getvalue()
-        mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    
-    b64 = base64.b64encode(data).decode()
-    href = f'<a href="data:{mime_type};base64,{b64}" download="{filename}" class="download-link">{text}</a>'
-    return href
-
-def plot_advanced_visualizations(df):
-    """Crée des visualisations avancées pour le dataset."""
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-    
-    figures = []
-    
-    # Distribution des variables numériques
-    if len(numeric_cols) > 0:
-        n_cols = min(3, len(numeric_cols))
-        n_rows = (len(numeric_cols) + n_cols - 1) // n_cols
-        
-        fig1, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
-        if n_rows == 1 and n_cols == 1:
-            axes = [axes]
-        elif n_rows == 1:
-            axes = axes
-        else:
-            axes = axes.flatten()
-        
-        for i, col in enumerate(numeric_cols):
-            if i < len(axes):
-                axes[i].hist(df[col].dropna(), bins=30, alpha=0.7, color='skyblue', edgecolor='black')
-                axes[i].set_title(f'Distribution de {col}')
-                axes[i].set_xlabel(col)
-                axes[i].set_ylabel('Fréquence')
-        
-        # Masquer les axes vides
-        for i in range(len(numeric_cols), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        figures.append(("Distribution des Variables Numériques", fig1))
-    
-    # Boxplots pour outliers
-    if len(numeric_cols) > 0:
-        n_cols = min(3, len(numeric_cols))
-        n_rows = (len(numeric_cols) + n_cols - 1) // n_cols
-        
-        fig2, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
-        if n_rows == 1 and n_cols == 1:
-            axes = [axes]
-        elif n_rows == 1:
-            axes = axes
-        else:
-            axes = axes.flatten()
-        
-        for i, col in enumerate(numeric_cols):
-            if i < len(axes):
-                axes[i].boxplot(df[col].dropna())
-                axes[i].set_title(f'Boxplot de {col}')
-                axes[i].set_ylabel(col)
-        
-        for i in range(len(numeric_cols), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        figures.append(("Analyse des Outliers", fig2))
-    
-    # Top catégories pour variables catégorielles
-    if len(categorical_cols) > 0:
-        for col in categorical_cols[:3]:  # Limiter aux 3 premières
-            fig3, ax = plt.subplots(figsize=(10, 6))
-            top_categories = df[col].value_counts().head(10)
-            top_categories.plot(kind='bar', ax=ax, color='lightcoral')
-            ax.set_title(f'Top 10 Catégories - {col}')
-            ax.set_xlabel(col)
-            ax.set_ylabel('Fréquence')
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            figures.append((f"Top Catégories - {col}", fig3))
-    
-    return figures
 
 # =============== INTERFACE PRINCIPALE ================
 
-st.markdown('<h1 class="main-header">📊 Analyseur Automatique de Fichiers CSV</h1>', unsafe_allow_html=True)
-st.markdown("""
-<div style='text-align: center; margin-bottom: 2rem;'>
-    <p style='font-size: 1.2rem; color: #666;'>
-        Chargez un fichier CSV pour obtenir une analyse complète et professionnelle de vos données
-    </p>
-</div>
-""", unsafe_allow_html=True)
+# Initialiser la BD
+init_db()
 
-# Sidebar pour les paramètres
+# Sidebar
 with st.sidebar:
-    st.header("⚙️ Paramètres")
-    st.markdown("---")
-    
-    # Options d'analyse
-    st.subheader("Options d'Analyse")
-    auto_analyze = st.checkbox("Analyse automatique", value=True)
-    show_correlations = st.checkbox("Afficher les corrélations", value=True)
-    detect_outliers_option = st.checkbox("Détection des outliers", value=True)
+    st.header("💰 Budget Personnel")
+    st.markdown("Gérez vos finances en **Franc CFA**")
     
     st.markdown("---")
-    st.subheader("À propos")
-    st.info("""
-    Cet outil vous permet d'analyser vos données CSV de manière professionnelle :
-    - 📊 Statistiques descriptives
-    - 🔍 Détection des valeurs manquantes
-    - 📈 Visualisations avancées
-    - 🧹 Nettoyage des données
-    - 📄 Rapports détaillés
-    """)
+    st.header("⚙️ Navigation")
+    page = st.radio(
+        "Sélectionnez une page:",
+        ["📊 Tableau de bord", "➕ Transactions rapides", "📈 Analyse financière", "💼 Gestion budgets", "📥 Export données"]
+    )
+    
+    st.markdown("---")
+    st.subheader("📅 Filtres avancés")
+    
+    # Période
+    period_options = ["Ce mois", "3 derniers mois", "6 derniers mois", "Cette année", "Personnalisé"]
+    selected_period = st.selectbox("Période", period_options)
+    
+    if selected_period == "Personnalisé":
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Date début", value=datetime.now() - timedelta(days=30))
+        with col2:
+            end_date = st.date_input("Date fin", value=datetime.now())
+    else:
+        end_date = datetime.now()
+        if selected_period == "Ce mois":
+            start_date = datetime(end_date.year, end_date.month, 1)
+        elif selected_period == "3 derniers mois":
+            start_date = end_date - timedelta(days=90)
+        elif selected_period == "6 derniers mois":
+            start_date = end_date - timedelta(days=180)
+        else:  # Cette année
+            start_date = datetime(end_date.year, 1, 1)
+    
+    # Filtre par catégorie
+    categories = st.multiselect(
+        "Catégories",
+        ["Toutes", "Alimentation", "Transport", "Loisirs", "Santé", "Éducation", "Logement", "Utilities", "Autre", "Salaire", "Bonus"],
+        default=["Toutes"]
+    )
+    
+    # Filtre par type
+    type_filter = st.multiselect(
+        "Type de transaction",
+        ["Tous", "Revenu", "Dépense"],
+        default=["Tous"]
+    )
 
-uploaded_file = st.file_uploader("**Choisissez un fichier CSV**", type=["csv"], 
-                                help="Sélectionnez un fichier CSV à analyser")
-
-if uploaded_file is not None:
-    try:
-        # Lecture du fichier avec gestion d'erreurs
-        df = pd.read_csv(uploaded_file)
-        st.success(f"✅ Fichier chargé avec succès : {uploaded_file.name}")
-        
-        # Métriques principales dans des cartes
-        st.markdown("## 📈 Métriques Principales")
+# =============== PAGE 1 : TABLEAU DE BORD ================
+if page == "📊 Tableau de bord":
+    st.title("💰 Dashboard Budget Personnel")
+    st.markdown(f"<span class='fcfа-badge'>Devise: Franc CFA (FCFA)</span>", unsafe_allow_html=True)
+    
+    # Transactions pour les alertes
+    df_alerts = get_transactions(start_date=start_date.isoformat(), end_date=end_date.isoformat())
+    budgets = get_budgets(f"{datetime.now().year}-{datetime.now().month:02d}")
+    
+    # Alertes intelligentes
+    alerts = check_alerts(df_alerts, budgets)
+    if alerts:
+        st.subheader("🔔 Alertes intelligentes")
+        for alert in alerts:
+            st.markdown(f"""
+            <div class="alert-box">
+                <strong>{alert['message']}</strong>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    stats = get_monthly_stats(datetime.now().year, datetime.now().month)
+    
+    if stats:
+        # Métriques principales
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.markdown(f"""
-            <div class="metric-card">
-                <h3>📏 Lignes</h3>
-                <h2>{df.shape[0]:,}</h2>
+            <div class="metric-container">
+                <div class="metric-label">💵 Revenus</div>
+                <div class="metric-value">{format_fcfa(stats['revenus'])}</div>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
             st.markdown(f"""
-            <div class="metric-card">
-                <h3>📋 Colonnes</h3>
-                <h2>{df.shape[1]}</h2>
+            <div class="metric-container">
+                <div class="metric-label">💸 Dépenses</div>
+                <div class="metric-value">{format_fcfa(stats['depenses'])}</div>
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
-            missing_total = df.isnull().sum().sum()
+            solde_color = "success" if stats['solde'] >= 0 else "danger"
             st.markdown(f"""
-            <div class="metric-card">
-                <h3>⚠️ Données Manquantes</h3>
-                <h2>{missing_total:,}</h2>
+            <div class="metric-container">
+                <div class="metric-label">💲 Solde</div>
+                <div class="metric-value {solde_color}">{format_fcfa(stats['solde'])}</div>
             </div>
             """, unsafe_allow_html=True)
         
         with col4:
-            memory_mb = df.memory_usage(deep=True).sum() / 1024**2
+            taux_epargne = (stats['solde'] / stats['revenus'] * 100) if stats['revenus'] > 0 else 0
+            epargne_color = "success" if taux_epargne >= 20 else "warning" if taux_epargne >= 10 else "danger"
             st.markdown(f"""
-            <div class="metric-card">
-                <h3>💾 Mémoire</h3>
-                <h2>{memory_mb:.1f} MB</h2>
+            <div class="metric-container">
+                <div class="metric-label">🎯 Taux d'épargne</div>
+                <div class="metric-value {epargne_color}">{taux_epargne:.1f}%</div>
             </div>
             """, unsafe_allow_html=True)
         
-        # Organisation en onglets
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "🔍 Aperçu", "📊 Analyse", "📈 Visualisations", 
-            "🧹 Nettoyage", "📥 Export", "📄 Rapport"
-        ])
+        st.markdown("---")
         
-        # ========== TAB 1 : APERÇU ==========
-        with tab1:
-            st.subheader("👀 Exploration des Données")
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.write("**Aperçu des données :**")
-                st.dataframe(df.head(20), width='stretch')
-            
-            with col2:
-                st.write("**Types de données :**")
-                dtype_df = df.dtypes.reset_index()
-                dtype_df.columns = ['Colonne', 'Type']
-                dtype_df['Type'] = dtype_df['Type'].astype(str)  # Convertir en string
-                st.dataframe(dtype_df, width='stretch')
-                
-                st.write("**Résumé des données :**")
-                st.json({
-                    "Dimensions": f"{df.shape[0]} lignes × {df.shape[1]} colonnes",
-                    "Colonnes Numériques": len(df.select_dtypes(include=[np.number]).columns),
-                    "Colonnes Catégorielles": len(df.select_dtypes(include=['object']).columns),
-                    "Valeurs Dupliquées": df.duplicated().sum()
-                })
+        # Graphiques financiers avancés
+        col1, col2 = st.columns(2)
         
-        # ========== TAB 2 : ANALYSE ==========
-        with tab2:
-            st.subheader("📊 Analyse Statistique")
+        with col1:
+            # Dépenses par catégorie (camembert)
+            cat_depenses = stats['transactions'][stats['transactions']['type'] == 'Dépense'].groupby('categorie')['montant'].sum()
             
-            # Analyse des valeurs manquantes
-            st.write("### ⚠️ Analyse des Valeurs Manquantes")
-            missing_df = calculate_missing_percentage(df)
-            st.dataframe(missing_df, width='stretch')
+            fig_pie = px.pie(
+                values=cat_depenses.values,
+                names=cat_depenses.index,
+                title="💰 Répartition des dépenses par catégorie",
+                template="plotly_dark"
+            )
+            fig_pie.update_traces(textinfo='percent+label+value', 
+                                texttemplate='%{label}<br>%{value:,} FCFA<br>(%{percent})',
+                                hovertemplate='<b>%{label}</b><br>%{value:,} FCFA<br>%{percent}')
+            st.plotly_chart(fig_pie, use_container_width=True)
             
-            # Statistiques descriptives
-            st.write("### 📈 Statistiques Descriptives")
-            
-            numeric_cols = df.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 0:
-                st.dataframe(df[numeric_cols].describe(), width='stretch')
-            else:
-                st.info("Aucune colonne numérique trouvée pour les statistiques descriptives.")
-            
-            # Analyse des corrélations
-            if show_correlations and len(numeric_cols) > 1:
-                st.write("### 🔗 Matrice de Corrélation")
-                fig, ax = plt.subplots(figsize=(10, 8))
-                sns.heatmap(df[numeric_cols].corr(), annot=True, fmt=".2f", cmap="coolwarm", 
-                           center=0, cbar_kws={"label": "Coefficient de Corrélation"}, ax=ax)
-                st.pyplot(fig)
-            
-            # Détection des outliers
-            if detect_outliers_option and len(numeric_cols) > 0:
-                st.write("### 🔴 Détection des Outliers")
-                outliers_data = []
-                for col in numeric_cols:
-                    count = detect_outliers(df[col])
-                    if count > 0:
-                        outliers_data.append({
-                            'Colonne': col,
-                            'Outliers': count,
-                            'Pourcentage': f"{(count/len(df))*100:.2f}%"
-                        })
-                
-                if outliers_data:
-                    outliers_df = pd.DataFrame(outliers_data)
-                    st.dataframe(outliers_df, width='stretch')
-                else:
-                    st.success("Aucun outlier détecté dans les données numériques.")
+            # Graphique en barres horizontales - Top dépenses
+            top_depenses = stats['transactions'][stats['transactions']['type'] == 'Dépense'].nlargest(10, 'montant')
+            fig_bar_h = px.bar(
+                top_depenses,
+                y='description',
+                x='montant',
+                title="📊 Top 10 des plus grosses dépenses",
+                orientation='h',
+                template="plotly_dark",
+                labels={'montant': 'Montant (FCFA)'}
+            )
+            fig_bar_h.update_traces(hovertemplate='<b>%{y}</b><br>%{x:,} FCFA')
+            st.plotly_chart(fig_bar_h, use_container_width=True)
         
-        # ========== TAB 3 : VISUALISATIONS ==========
-with tab3:
-    st.subheader("📈 Visualisations des Données")
-
-    # --- Visualisations automatiques ---
-    if auto_analyze:
-        st.write("### 🎨 Visualisations Automatiques")
-        figures = plot_advanced_visualizations(df)
-
-        for title, fig in figures:
-            st.write(f"**{title}**")
-            st.pyplot(fig)
-            st.markdown("---")
-
-    # ----------------------------------------------------
-    #         VISUALISATIONS PERSONNALISÉES AMÉLIORÉES
-    # ----------------------------------------------------
-    st.write("### 🎛️ Visualisations Personnalisées")
-
-    # Type de graphique
-    chart_type = st.selectbox(
-        "📊 Type de graphique :",
-        [
-            "Scatter Plot (Nuage de points)",
-            "Histogramme",
-            "Boxplot",
-            "Bar Chart",
-            "Line Plot",
-            "Density Plot (KDE)",
-            "Pie Chart",
-            "Heatmap d'une colonne"
-        ],
-        index=0
-    )
-
-    # Choix colonnes
-    col1, col2 = st.columns(2)
-
-    with col1:
-        x_axis = st.selectbox("Axe X :", df.columns, key="x_axis_custom")
-
-    with col2:
-        y_options = ['Aucun'] + list(df.columns)
-        y_axis = st.selectbox("Axe Y :", y_options, key="y_axis_custom")
-
-    # Récupération des types de données
-    x_num = np.issubdtype(df[x_axis].dtype, np.number)
-    y_num = y_axis != "Aucun" and np.issubdtype(df[y_axis].dtype, np.number)
-
-    # ----------------------------------------------------
-    #               GÉNÉRATION DES GRAPHIQUES
-    # ----------------------------------------------------
-
-    # SCATTER PLOT
-    if chart_type == "Scatter Plot (Nuage de points)":
-        if y_axis == "Aucun":
-            st.warning("Veuillez sélectionner une colonne Y pour ce graphique.")
-        elif x_num and y_num:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.scatter(df[x_axis], df[y_axis], alpha=0.6)
-            ax.set_xlabel(x_axis)
-            ax.set_ylabel(y_axis)
-            ax.set_title(f"Nuage de points : {x_axis} vs {y_axis}")
-            st.pyplot(fig)
-        else:
-            st.error("❌ Les colonnes X et Y doivent être numériques.")
-
-    # HISTOGRAMME
-    elif chart_type == "Histogramme":
-        if x_num:
-            bins = st.slider("Nombre de bins :", 5, 100, 30)
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.hist(df[x_axis], bins=bins, alpha=0.7)
-            ax.set_title(f"Histogramme de {x_axis}")
-            st.pyplot(fig)
-        else:
-            st.error("❌ L'histogramme requiert une colonne numérique.")
-
-    # BOXPLOT
-    elif chart_type == "Boxplot":
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.boxplot(x=df[x_axis], ax=ax)
-        ax.set_title(f"Boxplot de {x_axis}")
-        st.pyplot(fig)
-
-    # BAR CHART
-    elif chart_type == "Bar Chart":
-        if not x_num:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            df[x_axis].value_counts().plot(kind="bar", ax=ax)
-            ax.set_title(f"Bar Chart de {x_axis}")
-            st.pyplot(fig)
-        else:
-            st.error("❌ Le Bar Chart est destiné aux colonnes catégorielles.")
-
-    # LINE PLOT
-    elif chart_type == "Line Plot":
-        if x_num:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(df[x_axis])
-            ax.set_title(f"Courbe de {x_axis}")
-            st.pyplot(fig)
-        else:
-            st.error("❌ Le line plot nécessite une colonne numérique.")
-
-    # DENSITY PLOT (KDE)
-    elif chart_type == "Density Plot (KDE)":
-        if x_num:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            sns.kdeplot(df[x_axis], shade=True, ax=ax)
-            ax.set_title(f"Distribution KDE de {x_axis}")
-            st.pyplot(fig)
-        else:
-            st.error("❌ La densité nécessite une colonne numérique.")
-
-    # PIE CHART
-    elif chart_type == "Pie Chart":
-        if not x_num:
-            fig, ax = plt.subplots(figsize=(8, 8))
-            df[x_axis].value_counts().plot.pie(autopct="%1.1f%%", ax=ax)
-            ax.set_ylabel("")
-            ax.set_title(f"Répartition de {x_axis}")
-            st.pyplot(fig)
-        else:
-            st.error("❌ Le Pie chart fonctionne uniquement avec des catégories.")
-
-    # HEATMAP D'UNE COLONNE (distribution)
-    elif chart_type == "Heatmap d'une colonne":
-        fig, ax = plt.subplots(figsize=(10, 1))
-        sns.heatmap([df[x_axis].values], cmap="viridis", ax=ax, cbar=False)
-        ax.set_yticks([])
-        ax.set_title(f"Heatmap pour {x_axis}")
-        st.pyplot(fig)
-        # ========== TAB 4 : NETTOYAGE ==========
-        with tab4:
-            st.subheader("🧹 Outils de Nettoyage des Données")
+        with col2:
+            # Évolution temporelle (courbes)
+            df_daily = stats['transactions'].groupby(['date', 'type'])['montant'].sum().reset_index()
             
-            col1, col2 = st.columns(2)
+            fig_line = px.line(
+                df_daily,
+                x='date',
+                y='montant',
+                color='type',
+                title="📈 Évolution quotidienne des revenus et dépenses",
+                labels={'montant': 'Montant (FCFA)', 'date': 'Date'},
+                template="plotly_dark"
+            )
+            fig_line.update_traces(hovertemplate='<b>%{x}</b><br>%{y:,} FCFA')
+            st.plotly_chart(fig_line, use_container_width=True)
             
-            with col1:
-                st.write("### Suppression des Données")
-                
-                # Suppression des lignes avec valeurs manquantes
-                if st.button("🗑️ Supprimer Lignes avec Valeurs Manquantes", use_container_width=True):
-                    df_clean = df.dropna()
-                    rows_deleted = len(df) - len(df_clean)
-                    st.success(f"✅ {rows_deleted} lignes supprimées")
-                    st.dataframe(df_clean.head(), width='stretch')
-                    
-                    # Lien de téléchargement
-                    st.markdown(create_data_download_link(
-                        df_clean, "data_cleaned_dropna.csv", "📥 Télécharger les Données Nettoyées"
-                    ), unsafe_allow_html=True)
-                
-                # Suppression des colonnes avec trop de valeurs manquantes
-                st.write("### Sélection des Colonnes")
-                columns_to_keep = st.multiselect(
-                    "Choisissez les colonnes à conserver:",
-                    df.columns.tolist(),
-                    default=df.columns.tolist()
-                )
-                
-                if columns_to_keep:
-                    df_filtered = df[columns_to_keep]
-                    st.dataframe(df_filtered.head(), width='stretch')
-                    
-                    st.markdown(create_data_download_link(
-                        df_filtered, "data_filtered_columns.csv", "📥 Télécharger avec Colonnes Sélectionnées"
-                    ), unsafe_allow_html=True)
+            # Graphique à zones empilées
+            df_stacked = stats['transactions'][stats['transactions']['type'] == 'Dépense']
+            df_stacked = df_stacked.groupby(['date', 'categorie'])['montant'].sum().reset_index()
             
-            with col2:
-                st.write("### Transformation des Données")
-                
-                # Imputation des valeurs manquantes
-                if st.button("🔧 Imputer Valeurs Manquantes", use_container_width=True):
-                    df_imputed = df.copy()
-                    
-                    for col in df_imputed.columns:
-                        if df_imputed[col].dtype in [np.float64, np.int64]:
-                            # Pour les numériques : moyenne ou médiane
-                            if df_imputed[col].skew() > 1:  # Distribution asymétrique
-                                df_imputed[col] = df_imputed[col].fillna(df_imputed[col].median())
-                            else:
-                                df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mean())
-                        else:
-                            # Pour les catégorielles : mode
-                            if len(df_imputed[col].mode()) > 0:
-                                df_imputed[col] = df_imputed[col].fillna(df_imputed[col].mode()[0])
-                            else:
-                                df_imputed[col] = df_imputed[col].fillna("Inconnu")
-                    
-                    st.success("✅ Valeurs manquantes imputées")
-                    st.dataframe(df_imputed.head(), width='stretch')
-                    
-                    st.markdown(create_data_download_link(
-                        df_imputed, "data_imputed.csv", "📥 Télécharger les Données Imputées"
-                    ), unsafe_allow_html=True)
-                
-                # Normalisation des données numériques
-                numeric_cols = df.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) > 0:
-                    if st.button("📊 Normaliser Données Numériques", use_container_width=True):
-                        df_normalized = df.copy()
-                        for col in numeric_cols:
-                            # Éviter la division par zéro
-                            col_min = df[col].min()
-                            col_max = df[col].max()
-                            if col_max != col_min:
-                                df_normalized[col] = (df[col] - col_min) / (col_max - col_min)
-                            else:
-                                df_normalized[col] = 0.5  # Valeur constante
-                        
-                        st.success("✅ Données numériques normalisées (0-1)")
-                        st.dataframe(df_normalized.head(), width='stretch')
-                        
-                        st.markdown(create_data_download_link(
-                            df_normalized, "data_normalized.csv", "📥 Télécharger les Données Normalisées"
-                        ), unsafe_allow_html=True)
+            fig_area = px.area(
+                df_stacked,
+                x='date',
+                y='montant',
+                color='categorie',
+                title="📊 Évolution des dépenses par catégorie",
+                template="plotly_dark",
+                labels={'montant': 'Montant (FCFA)'}
+            )
+            fig_area.update_traces(hovertemplate='<b>%{x}</b><br>%{y:,} FCFA')
+            st.plotly_chart(fig_area, use_container_width=True)
         
-        # ========== TAB 5 : EXPORT ==========
-        with tab5:
-            st.subheader("📥 Export des Données")
-            
-            st.write("### Télécharger dans Différents Formats")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown(create_data_download_link(
-                    df, "dataset_analyse.csv", "📥 Télécharger en CSV", 'csv'
-                ), unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown(create_data_download_link(
-                    df, "dataset_analyse.json", "📥 Télécharger en JSON", 'json'
-                ), unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown(create_data_download_link(
-                    df, "dataset_analyse.xlsx", "📥 Télécharger en Excel", 'excel'
-                ), unsafe_allow_html=True)
-            
-            # Export des données transformées
-            st.write("### Données Transformées")
-            st.info("Utilisez l'onglet 'Nettoyage' pour appliquer des transformations avant l'export.")
-        
-        # ========== TAB 6 : RAPPORT ==========
-        with tab6:
-            st.subheader("📄 Rapport d'Analyse Complet")
-            
-            if st.button("🔄 Générer le Rapport", type="primary"):
-                with st.spinner("Génération du rapport en cours..."):
-                    report_content = generate_advanced_report(df)
-                
-                st.success("✅ Rapport généré avec succès!")
-                
-                # Aperçu du rapport
-                st.write("### Aperçu du Rapport")
-                st.markdown(report_content[:1000] + "..." if len(report_content) > 1000 else report_content)
-                
-                # Téléchargement du rapport
-                st.write("### Téléchargement")
-                st.markdown(create_download_link(
-                    report_content, 
-                    f"rapport_analyse_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
-                    "📥 Télécharger le Rapport Complet (Markdown)"
-                ), unsafe_allow_html=True)
-                
-                # Résumé exécutif
-                st.write("### 📋 Résumé Exécutif")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    total_cells = df.shape[0] * df.shape[1]
-                    missing_cells = df.isnull().sum().sum()
-                    data_quality = ((total_cells - missing_cells) / total_cells * 100) if total_cells > 0 else 100
-                    st.metric("Qualité Globale des Données", f"{data_quality:.1f}%")
-                    st.metric("Variables Numériques", len(df.select_dtypes(include=[np.number]).columns))
-                
-                with col2:
-                    completeness_rate = (1 - missing_cells / total_cells) * 100 if total_cells > 0 else 100
-                    st.metric("Taux de Complétude", f"{completeness_rate:.1f}%")
-                    st.metric("Variables Catégorielles", len(df.select_dtypes(include=['object']).columns))
+        # Transactions récentes
+        st.subheader("🔄 Transactions récentes")
+        transactions_display = stats['transactions'].head(10).copy()
+        transactions_display['montant'] = transactions_display['montant'].apply(format_fcfa)
+        st.dataframe(
+            transactions_display[['date', 'description', 'categorie', 'montant', 'type']],
+            width='stretch',
+            hide_index=True
+        )
     
-    except Exception as e:
-        st.error(f"❌ Erreur lors de la lecture du fichier: {str(e)}")
-        st.info("""
-        **Conseils de dépannage :**
-        - Vérifiez que le fichier est un CSV valide
-        - Assurez-vous que l'encodage est correct (UTF-8 recommandé)
-        - Vérifiez les séparateurs utilisés
-        - Contrôlez la cohérence des données
-        """)
+    else:
+        st.info(f"📭 Aucune transaction pour ce mois")
 
-else:
-    # Page d'accueil quand aucun fichier n'est chargé
-    st.markdown("""
-    <div style='text-align: center; padding: 5rem;'>
-        <h2>🚀 Bienvenue dans l'Analyseur CSV Pro</h2>
-        <p style='font-size: 1.1rem; color: #666; margin-bottom: 3rem;'>
-            Commencez par charger un fichier CSV pour découvrir toutes les fonctionnalités d'analyse
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+# =============== PAGE 2 : TRANSACTIONS RAPIDES ================
+elif page == "➕ Transactions rapides":
+    st.title("➕ Gestion des Transactions")
+    st.markdown(f"<span class='fcfа-badge'>Tous les montants en Franc CFA (entiers)</span>", unsafe_allow_html=True)
+    
+    # Section d'ajout rapide avec montants personnalisés
+    st.markdown('<div class="quick-add-form">', unsafe_allow_html=True)
+    st.subheader("⚡ Actions rapides avec montant personnalisé")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("""
-        <div style='text-align: center;'>
-            <h3>📊 Analyse Complète</h3>
-            <p>Statistiques descriptives, corrélations, détection d'outliers</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.write("**💵 Revenus rapides**")
+        
+        # Formulaire rapide pour Salaire
+        with st.form(key='salaire_form'):
+            salaire_montant = st.number_input("💰 Montant du salaire (FCFA)", min_value=0, step=1000, value=250000, format="%d", key="salaire_montant")
+            if st.form_submit_button("💼 Ajouter Salaire", use_container_width=True):
+                add_transaction(
+                    date=datetime.now().isoformat(),
+                    description="Salaire mensuel",
+                    categorie="Salaire",
+                    montant=salaire_montant,
+                    type_trans="Revenu"
+                )
+                st.success(f"Salaire de {format_fcfa(salaire_montant)} ajouté!")
+        
+        # Formulaire rapide pour Bonus
+        with st.form(key='bonus_form'):
+            bonus_montant = st.number_input("🎁 Montant du bonus (FCFA)", min_value=0, step=1000, value=50000, format="%d", key="bonus_montant")
+            if st.form_submit_button("💰 Ajouter Bonus", use_container_width=True):
+                add_transaction(
+                    date=datetime.now().isoformat(),
+                    description="Bonus",
+                    categorie="Bonus",
+                    montant=bonus_montant,
+                    type_trans="Revenu"
+                )
+                st.success(f"Bonus de {format_fcfa(bonus_montant)} ajouté!")
     
     with col2:
-        st.markdown("""
-        <div style='text-align: center;'>
-            <h3>🧹 Nettoyage Intelligent</h3>
-            <p>Gestion des valeurs manquantes, normalisation, filtrage</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.write("**💸 Dépenses courantes**")
+        
+        # Formulaire rapide pour Courses
+        with st.form(key='courses_form'):
+            courses_montant = st.number_input("🛒 Montant courses (FCFA)", min_value=0, step=1000, value=45000, format="%d", key="courses_montant")
+            if st.form_submit_button("🛒 Ajouter Courses", use_container_width=True):
+                add_transaction(
+                    date=datetime.now().isoformat(),
+                    description="Courses alimentaires",
+                    categorie="Alimentation",
+                    montant=courses_montant,
+                    type_trans="Dépense"
+                )
+                st.success(f"Courses de {format_fcfa(courses_montant)} ajoutées!")
+        
+        # Formulaire rapide pour Transport
+        with st.form(key='transport_form'):
+            transport_montant = st.number_input("⛽ Montant transport (FCFA)", min_value=0, step=1000, value=25000, format="%d", key="transport_montant")
+            if st.form_submit_button("🚗 Ajouter Transport", use_container_width=True):
+                add_transaction(
+                    date=datetime.now().isoformat(),
+                    description="Frais de transport",
+                    categorie="Transport",
+                    montant=transport_montant,
+                    type_trans="Dépense"
+                )
+                st.success(f"Transport de {format_fcfa(transport_montant)} ajouté!")
     
     with col3:
-        st.markdown("""
-        <div style='text-align: center;'>
-            <h3>📈 Visualisations Avancées</h3>
-            <p>Graphiques interactifs, analyses multidimensionnelles</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.write("**🎯 Autres dépenses**")
+        
+        # Formulaire rapide pour Restaurant
+        with st.form(key='restaurant_form'):
+            restaurant_montant = st.number_input("🍽️ Montant restaurant (FCFA)", min_value=0, step=1000, value=15000, format="%d", key="restaurant_montant")
+            if st.form_submit_button("🍽️ Ajouter Restaurant", use_container_width=True):
+                add_transaction(
+                    date=datetime.now().isoformat(),
+                    description="Repas au restaurant",
+                    categorie="Loisirs",
+                    montant=restaurant_montant,
+                    type_trans="Dépense"
+                )
+                st.success(f"Restaurant de {format_fcfa(restaurant_montant)} ajouté!")
+        
+        # Formulaire rapide pour Abonnement
+        with st.form(key='abonnement_form'):
+            abonnement_montant = st.number_input("📱 Montant abonnement (FCFA)", min_value=0, step=1000, value=10000, format="%d", key="abonnement_montant")
+            if st.form_submit_button("📱 Ajouter Abonnement", use_container_width=True):
+                add_transaction(
+                    date=datetime.now().isoformat(),
+                    description="Abonnement mensuel",
+                    categorie="Utilities",
+                    montant=abonnement_montant,
+                    type_trans="Dépense"
+                )
+                st.success(f"Abonnement de {format_fcfa(abonnement_montant)} ajouté!")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Formulaire d'ajout manuel complet
+    st.subheader("✏️ Ajout manuel personnalisé")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        date = st.date_input("📅 Date", value=datetime.now())
+        description = st.text_input("📝 Description")
+        type_trans = st.selectbox("Type", ["Dépense", "Revenu"])
+    
+    with col2:
+        montant = st.number_input("💰 Montant (FCFA)", min_value=0, step=100, value=1000, format="%d")
+        categorie = st.selectbox(
+            "📂 Catégorie",
+            ["Alimentation", "Transport", "Loisirs", "Santé", "Éducation", 
+             "Logement", "Utilities", "Autre", "Salaire", "Bonus"]
+        )
+    
+    notes = st.text_area("📌 Notes (optionnel)")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("✅ Ajouter transaction", type="primary", use_container_width=True):
+            if description and montant > 0:
+                add_transaction(
+                    date=date.isoformat(),
+                    description=description,
+                    categorie=categorie,
+                    montant=montant,
+                    type_trans=type_trans,
+                    notes=notes
+                )
+                st.success(f"✅ {description} ({format_fcfa(montant)}) ajoutée!")
+                st.rerun()
+            else:
+                st.error("❌ Veuillez remplir tous les champs obligatoires")
+    
+    with col2:
+        if st.button("🔄 Réinitialiser", use_container_width=True):
+            st.rerun()
 
-# Pied de page
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; font-size: 0.9rem;'>
-    <p>Analyseur CSV Pro • Développé avec Streamlit</p>
-</div>
-""", unsafe_allow_html=True)
+# =============== PAGE 3 : ANALYSE FINANCIÈRE ================
+elif page == "📈 Analyse financière":
+    st.title("📈 Analyse Financière Avancée")
+    st.markdown(f"<span class='fcfа-badge'>Analyse en Franc CFA</span>", unsafe_allow_html=True)
+    
+    # Récupérer les données filtrées
+    query_conditions = []
+    params = []
+    
+    query_conditions.append("date >= ? AND date <= ?")
+    params.extend([start_date.isoformat(), end_date.isoformat()])
+    
+    if "Toutes" not in categories:
+        placeholders = ','.join(['?'] * len(categories))
+        query_conditions.append(f"categorie IN ({placeholders})")
+        params.extend(categories)
+    
+    if "Tous" not in type_filter:
+        placeholders = ','.join(['?'] * len(type_filter))
+        query_conditions.append(f"type IN ({placeholders})")
+        params.extend(type_filter)
+    
+    where_clause = " AND ".join(query_conditions)
+    
+    conn = sqlite3.connect('budget.db')
+    df_analysis = pd.read_sql_query(
+        f"SELECT * FROM transactions WHERE {where_clause} ORDER BY date",
+        conn, params=params
+    )
+    conn.close()
+    
+    if not df_analysis.empty:
+        df_analysis['date'] = pd.to_datetime(df_analysis['date'])
+        df_analysis['month'] = df_analysis['date'].dt.to_period('M')
+        df_analysis['montant'] = df_analysis['montant'].astype(int)
+        
+        # Statistiques détaillées
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total = df_analysis['montant'].sum()
+            st.metric("📊 Total", format_fcfa(total))
+        
+        with col2:
+            moyenne = df_analysis['montant'].mean()
+            st.metric("📈 Moyenne", format_fcfa(int(moyenne)))
+        
+        with col3:
+            max_trans = df_analysis['montant'].max()
+            st.metric("🔝 Maximum", format_fcfa(max_trans))
+        
+        with col4:
+            count_trans = len(df_analysis)
+            st.metric("🔢 Nombre", f"{count_trans}")
+        
+        st.markdown("---")
+        
+        # Graphiques avancés
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Revenus vs Dépenses par mois
+            monthly_data = df_analysis.groupby(['month', 'type'])['montant'].sum().reset_index()
+            monthly_data['month'] = monthly_data['month'].astype(str)
+            
+            fig_monthly = px.bar(
+                monthly_data,
+                x='month',
+                y='montant',
+                color='type',
+                title="📊 Revenus et dépenses par mois",
+                barmode='group',
+                template="plotly_dark",
+                labels={'montant': 'Montant (FCFA)', 'month': 'Mois'}
+            )
+            fig_monthly.update_traces(hovertemplate='<b>%{x}</b><br>%{y:,} FCFA')
+            st.plotly_chart(fig_monthly, use_container_width=True)
+            
+            # Graphique en cascade (waterfall) - Évolution du solde
+            monthly_balance = df_analysis.groupby('month').apply(
+                lambda x: x[x['type']=='Revenu']['montant'].sum() - x[x['type']=='Dépense']['montant'].sum()
+            ).reset_index()
+            monthly_balance.columns = ['month', 'solde']
+            monthly_balance['month'] = monthly_balance['month'].astype(str)
+            
+            fig_waterfall = go.Figure(go.Waterfall(
+                name="Solde",
+                orientation="v",
+                measure=["relative"] * len(monthly_balance),
+                x=monthly_balance['month'],
+                y=monthly_balance['solde'],
+                connector={"line":{"color":"rgb(63, 63, 63)"}},
+            ))
+            
+            fig_waterfall.update_layout(
+                title="💧 Évolution du solde mensuel (FCFA)",
+                showlegend=True,
+                template="plotly_dark"
+            )
+            fig_waterfall.update_traces(hovertemplate='<b>%{x}</b><br>%{y:,} FCFA')
+            st.plotly_chart(fig_waterfall, use_container_width=True)
+        
+        with col2:
+            # Top catégories
+            top_cat = df_analysis.groupby('categorie')['montant'].sum().nlargest(8)
+            fig_top = px.bar(
+                x=top_cat.values,
+                y=top_cat.index,
+                orientation='h',
+                title="🏆 Top catégories par montant (FCFA)",
+                template="plotly_dark",
+                labels={'x': 'Montant (FCFA)', 'y': 'Catégorie'}
+            )
+            fig_top.update_traces(hovertemplate='<b>%{y}</b><br>%{x:,} FCFA')
+            st.plotly_chart(fig_top, use_container_width=True)
+            
+            # Distribution des montants
+            fig_dist = px.histogram(
+                df_analysis,
+                x='montant',
+                nbins=20,
+                title="📊 Distribution des montants (FCFA)",
+                template="plotly_dark",
+                labels={'montant': 'Montant (FCFA)'}
+            )
+            fig_dist.update_traces(hovertemplate='<b>%{x:,} FCFA</b><br>Count: %{y}')
+            st.plotly_chart(fig_dist, use_container_width=True)
+        
+        # Analyse de tendance
+        st.subheader("📈 Analyse de tendance")
+        
+        # Préparation des données pour l'analyse de tendance
+        df_trend = df_analysis.copy()
+        df_trend['week'] = df_trend['date'].dt.isocalendar().week
+        df_trend['year_week'] = df_trend['date'].dt.year.astype(str) + '-W' + df_trend['week'].astype(str)
+        
+        weekly_trend = df_trend.groupby(['year_week', 'type'])['montant'].sum().reset_index()
+        
+        fig_trend = px.line(
+            weekly_trend,
+            x='year_week',
+            y='montant',
+            color='type',
+            title="📈 Tendances hebdomadaires (FCFA)",
+            template="plotly_dark",
+            labels={'montant': 'Montant (FCFA)', 'year_week': 'Semaine'}
+        )
+        fig_trend.update_traces(hovertemplate='<b>%{x}</b><br>%{y:,} FCFA')
+        st.plotly_chart(fig_trend, use_container_width=True)
+        
+        # Tableau détaillé
+        st.subheader("📋 Détail des transactions")
+        display_df = df_analysis[['date', 'description', 'categorie', 'montant', 'type']].copy()
+        display_df['montant'] = display_df['montant'].apply(format_fcfa)
+        st.dataframe(
+            display_df.sort_values('date', ascending=False),
+            width='stretch',
+            hide_index=True
+        )
+    
+    else:
+        st.info("📭 Aucune transaction pour cette période avec les filtres sélectionnés")
+
+# =============== PAGE 4 : GESTION BUDGETS ================
+elif page == "💼 Gestion budgets":
+    st.title("💼 Gestion des Budgets")
+    st.markdown(f"<span class='fcfа-badge'>Budgets en Franc CFA</span>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("➕ Définir un budget")
+        
+        categorie_budget = st.selectbox(
+            "Catégorie",
+            ["Alimentation", "Transport", "Loisirs", "Santé", "Éducation", "Logement", "Utilities", "Autre"]
+        )
+        
+        limite_budget = st.number_input("Limite mensuelle (FCFA)", min_value=0, step=1000, value=50000, format="%d")
+        
+        mois_budget = st.selectbox(
+            "Mois",
+            [f"{datetime.now().year}-{datetime.now().month:02d}"] + 
+            [f"{datetime.now().year}-{(datetime.now().month + i) % 12 or 12:02d}" for i in range(1, 6)]
+        )
+        
+        if st.button("✅ Définir le budget", type="primary", use_container_width=True):
+            set_budget(categorie_budget, limite_budget, mois_budget)
+            st.success(f"✅ Budget de {format_fcfa(limite_budget)} défini pour {categorie_budget} ({mois_budget})")
+            st.rerun()
+    
+    with col2:
+        st.subheader("📊 Tableau des budgets")
+        
+        budgets = get_budgets(f"{datetime.now().year}-{datetime.now().month:02d}")
+        
+        if not budgets.empty:
+            # Récupérer les dépenses actuelles
+            transactions = get_transactions(
+                start_date=f"{datetime.now().year}-{datetime.now().month:02d}-01",
+                end_date=f"{datetime.now().year}-{datetime.now().month:02d}-31"
+            )
+            
+            budget_data = []
+            
+            for _, budget in budgets.iterrows():
+                cat = budget['categorie']
+                limite = budget['limite']
+                
+                dépenses = transactions[
+                    (transactions['categorie'] == cat) & 
+                    (transactions['type'] == 'Dépense')
+                ]['montant'].sum()
+                
+                utilisation = (dépenses / limite * 100) if limite > 0 else 0
+                reste = limite - dépenses
+                
+                budget_data.append({
+                    'Catégorie': cat,
+                    'Limite': format_fcfa(limite),
+                    'Dépenses': format_fcfa(dépenses),
+                    'Reste': format_fcfa(reste),
+                    'Utilisation': f"{utilisation:.1f}%"
+                })
+            
+            df_budget = pd.DataFrame(budget_data)
+            st.dataframe(df_budget, width='stretch', hide_index=True)
+            
+            # Graphique d'utilisation des budgets
+            utilisation_values = [float(x.split('%')[0]) for x in df_budget['Utilisation']]
+            fig_budget = px.bar(
+                df_budget,
+                x='Catégorie',
+                y=utilisation_values,
+                title="📊 Utilisation des budgets (%)",
+                template="plotly_dark",
+                labels={'y': 'Pourcentage d\'utilisation'}
+            )
+            fig_budget.update_traces(hovertemplate='<b>%{x}</b><br>%{y:.1f}%')
+            st.plotly_chart(fig_budget, use_container_width=True)
+        else:
+            st.info("📭 Aucun budget défini pour ce mois")
+
+# =============== PAGE 5 : EXPORT DONNÉES ================
+elif page == "📥 Export données":
+    st.title("📥 Import / Export des données")
+    st.markdown(f"<span class='fcfа-badge'>Données en Franc CFA</span>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📤 Exporter les données")
+        
+        format_export = st.radio("Format d'export", ["CSV", "Excel"])
+        
+        # Appliquer les filtres pour l'export
+        transactions_export = get_transactions(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat()
+        )
+        
+        if not transactions_export.empty:
+            if format_export == "CSV":
+                csv_data = export_to_csv(transactions_export)
+                st.download_button(
+                    label="📥 Télécharger en CSV",
+                    data=csv_data,
+                    file_name=f"budget_{start_date}_{end_date}.csv",
+                    mime="text/csv",
+                    type="primary",
+                    use_container_width=True
+                )
+            else:
+                excel_data = export_to_excel(transactions_export)
+                st.download_button(
+                    label="📥 Télécharger en Excel",
+                    data=excel_data,
+                    file_name=f"budget_{start_date}_{end_date}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True
+                )
+            
+            # Statistiques d'export
+            total_export = transactions_export['montant'].sum()
+            st.info(f"""
+            **Résumé de l'export:**
+            - Période: {start_date} à {end_date}
+            - Nombre de transactions: {len(transactions_export)}
+            - Total: {format_fcfa(total_export)}
+            """)
+        else:
+            st.info("📭 Aucune donnée à exporter pour cette période")
+    
+    with col2:
+        st.subheader("📥 Importer des données")
+        
+        uploaded_file = st.file_uploader("Choisissez un fichier CSV", type=["csv"])
+        
+        if uploaded_file is not None:
+            try:
+                df_import = pd.read_csv(uploaded_file)
+                
+                st.write("Aperçu des données à importer:")
+                st.dataframe(df_import.head(), width='stretch')
+                
+                # Vérification des colonnes requises
+                required_columns = ['date', 'description', 'categorie', 'montant', 'type']
+                missing_columns = [col for col in required_columns if col not in df_import.columns]
+                
+                if missing_columns:
+                    st.error(f"❌ Colonnes manquantes: {', '.join(missing_columns)}")
+                else:
+                    if st.button("✅ Importer les données", type="primary", use_container_width=True):
+                        for _, row in df_import.iterrows():
+                            add_transaction(
+                                date=row['date'],
+                                description=row['description'],
+                                categorie=row['categorie'],
+                                montant=int(row['montant']),
+                                type_trans=row['type'],
+                                notes=row.get('notes', '')
+                            )
+                        st.success(f"✅ {len(df_import)} transactions importées avec succès!")
+                        st.rerun()
+            except Exception as e:
+                st.error(f"❌ Erreur lors de l'import: {e}")
+    
+    st.markdown("---")
+    st.subheader("📊 Historique complet")
+    
+    # Appliquer les filtres pour l'historique
+    all_transactions = get_transactions(
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat()
+    )
+    
+    if not all_transactions.empty:
+        # Filtres supplémentaires pour l'historique
+        col1, col2 = st.columns(2)
+        with col1:
+            sort_by = st.selectbox("Trier par", ["Date récente", "Date ancienne", "Montant croissant", "Montant décroissant"])
+        with col2:
+            show_columns = st.multiselect(
+                "Colonnes à afficher",
+                ['date', 'description', 'categorie', 'montant', 'type', 'notes'],
+                default=['date', 'description', 'categorie', 'montant', 'type']
+            )
+        
+        # Appliquer le tri
+        if sort_by == "Date récente":
+            all_transactions = all_transactions.sort_values('date', ascending=False)
+        elif sort_by == "Date ancienne":
+            all_transactions = all_transactions.sort_values('date', ascending=True)
+        elif sort_by == "Montant croissant":
+            all_transactions = all_transactions.sort_values('montant', ascending=True)
+        else:  # Montant décroissant
+            all_transactions = all_transactions.sort_values('montant', ascending=False)
+        
+        # Formater l'affichage
+        display_hist = all_transactions[show_columns].copy()
+        if 'montant' in display_hist.columns:
+            display_hist['montant'] = display_hist['montant'].apply(format_fcfa)
+        
+        st.dataframe(
+            display_hist,
+            width='stretch',
+            hide_index=True,
+            height=500
+        )
+    else:
+        st.info("📭 Aucune transaction enregistrée pour cette période")
